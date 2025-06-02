@@ -54,6 +54,31 @@
 
 #include <errno.h>
 
+// REFACTOR copypaste
+static class SSLContext {
+	SSL_CTX* ctx = nullptr;
+
+public:
+	SSL_CTX* getContext() {
+		if (!ctx) {
+
+			(void)SSL_library_init();
+			SSL_load_error_strings();
+
+			ctx = SSL_CTX_new(TLS_client_method());
+			SSL_CTX_set_mode(ctx,SSL_MODE_AUTO_RETRY);
+
+			if (!ctx) {
+				throw std::runtime_error("SSL_CTX_new() failed.");
+			}
+		}
+		return ctx;
+	}
+	~SSLContext() {
+		if (ctx) SSL_CTX_free(ctx);
+	}
+} _sse_context;
+
 namespace Protocol
 {
 
@@ -408,6 +433,69 @@ namespace Protocol
 		}
 
 		return 0;
+	}
+
+	bool TLS::connect()
+	{
+		if (!TCP::connect())
+			return false;
+		ssl = SSL_new(_sse_context.getContext());
+		if (!ssl) {
+			Error() << "TLS Client [" << getHost() << "]: error during SSL new - error code : " << ERR_get_error() ;
+			return false;
+		}
+
+		SSL_set_tlsext_host_name(ssl, getHost().c_str());
+		SSL_set_fd(ssl, getSocket());
+
+		int ret = SSL_connect(ssl);
+		int sslErr;
+		while (ret != 1) {
+			sslErr = SSL_get_error(ssl, ret);
+			if (sslErr == SSL_ERROR_WANT_WRITE || sslErr==SSL_ERROR_WANT_READ) {
+				std::this_thread::sleep_for(std::chrono::milliseconds(5));
+				ret = SSL_connect(ssl);
+			} else {
+				Error() << "TLS Client [" << getHost() << "]: error during SSL handshake - error code : " << ERR_get_error() << " - ssl error code : " << sslErr;
+				return false;
+			}
+		}
+		ProtocolBase::onConnect();
+		return true;
+	}
+
+	// void TLS::disconnect()
+	// {
+	// 	// TODO? close ssl?
+	// }
+
+	int TLS::read(void *data, int length, int t, bool wait)
+	{
+		int ret = SSL_read(ssl, data, length);
+		int sslErr = SSL_get_error(ssl, ret);
+		auto start = std::chrono::steady_clock::now();
+		while (wait && ret <= 0 && start + std::chrono::seconds(t) > std::chrono::steady_clock::now()) {
+			if (ret == 0 || sslErr == SSL_ERROR_WANT_WRITE || sslErr == SSL_ERROR_WANT_READ) {
+				std::this_thread::sleep_for(std::chrono::microseconds(20));
+				ret = SSL_read(ssl, data, length);
+			} else {
+				break;
+			}
+		}
+		if (ret <= 0) {
+			Error() << "TLS read error " << sslErr;
+		}
+		return ret;
+	}
+
+	int TLS::send(const void *data, int length)
+	{
+		return SSL_write(ssl, data, length);
+	}
+
+	bool TLS::isConnected() {
+		// TODO
+		return true;
 	}
 
 	void WebSocket::onConnect()

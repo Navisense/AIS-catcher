@@ -48,6 +48,9 @@
 #include <netinet/in.h>
 #endif
 
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
 #include "Utilities.h"
 #include "Common.h"
 
@@ -302,6 +305,23 @@ namespace Protocol
 			disconnect();
 			return connect();
 		}
+	};
+
+class TLS : public TCP
+	{
+	public:
+
+		TLS() : TCP() {}; //TODO actually set name to TLS
+		// void disconnect() override;
+		bool connect() override;
+
+		int read(void *data, int length, int t, bool wait) override;
+		int send(const void *data, int length) override;
+		bool isConnected() override;
+
+	private:
+		SSL* ssl = nullptr;
+		bool hasCalledOnConnect = false;
 	};
 
 	// http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc398718023
