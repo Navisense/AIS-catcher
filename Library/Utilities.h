@@ -21,6 +21,7 @@
 #include <cassert>
 #include <vector>
 #include <time.h>
+#include <sys/time.h>
 #include <iostream>
 #include <fstream>
 #include <mutex>

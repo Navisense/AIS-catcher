@@ -20,6 +20,7 @@
 #include <thread>
 #include <mutex>
 #include <time.h>
+#include <sys/time.h>
 
 #ifdef _WIN32
 #include <winsock2.h>
