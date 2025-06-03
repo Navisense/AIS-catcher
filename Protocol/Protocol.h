@@ -439,10 +439,12 @@ namespace Protocol
 
 		int send(const void *data, int length) override
 		{
-			if (!isConnected())
+			while (!isConnected())
 			{
+				Error() << "send not conn";
 				updateState();
-				return 0;
+				std::this_thread::sleep_for(std::chrono::milliseconds(5));
+				// return 0;
 			}
 
 			int sent = SSL_write(ssl, data, length);
@@ -477,10 +479,14 @@ namespace Protocol
 
 		int read(void *data, int length, int timeout = 0, bool wait = false) override
 		{
-			if (!isConnected())
+			wait=true;
+			timeout=timeout+1;
+			while (!isConnected())
 			{
+				Error() << "not conn";
 				updateState();
-				return 0;
+				std::this_thread::sleep_for(std::chrono::milliseconds(5));
+				// return 0;
 			}
 
 			// Check if there's pending data in SSL buffer
@@ -495,30 +501,43 @@ namespace Protocol
 				}
 			}
 
-			int received = SSL_read(ssl, data, length);
-			if (received <= 0)
+			auto start = std::chrono::steady_clock::now();
+			bool hasPrinted = false;
+			int received;
+			while (true)
 			{
-				int error = SSL_get_error(ssl, received);
-
-				switch (error)
+				received = SSL_read(ssl, data, length);
+				if (received <= 0)
 				{
-				case SSL_ERROR_WANT_READ:
-				case SSL_ERROR_WANT_WRITE:
-					return 0;
+					int error = SSL_get_error(ssl, received);
+					if (!hasPrinted) { Error() << "ssl err " << error; hasPrinted = true;}
+					switch (error)
+					{
+					case SSL_ERROR_WANT_READ:
+					case SSL_ERROR_WANT_WRITE:
+						if (!wait || start + std::chrono::seconds(timeout) < std::chrono::steady_clock::now())
+						{
+							Error() << "want but enough wait";
+							return 0;
+						}
+						std::this_thread::sleep_for(std::chrono::microseconds(20000));
+						break;
 
-				case SSL_ERROR_ZERO_RETURN:
-					// Connection closed cleanly
-					Warning() << "TLS (" << getHost() << ":" << getPort() << "): Connection closed by peer";
-					disconnect();
-					return -1;
+					case SSL_ERROR_ZERO_RETURN:
+						// Connection closed cleanly
+						Warning() << "TLS (" << getHost() << ":" << getPort() << "): Connection closed by peer";
+						disconnect();
+						return -1;
 
-				case SSL_ERROR_SYSCALL:
-				case SSL_ERROR_SSL:
-				default:
-					Error() << "TLS (" << getHost() << ":" << getPort() << "): Read error: " << getSSLErrorString(error);
-					disconnect();
-					return -1;
+					case SSL_ERROR_SYSCALL:
+					case SSL_ERROR_SSL:
+					default:
+						Error() << "TLS (" << getHost() << ":" << getPort() << "): Read error: " << getSSLErrorString(error);
+						disconnect();
+						return -1;
+					}
 				}
+				else{break;}
 			}
 
 			return received;
@@ -845,18 +864,28 @@ namespace Protocol
 
 		bool readPacket(uint8_t &type, int &length)
 		{
-			if (prev->read(&type, 1, 5, true) != 1)
+			auto ret = prev->read(&type, 1, 5, true);
+			if (ret != 1)
+			{
+				Error() << "1 " << ret;
 				return false;
+			}
 
 			length = readRemainingLength();
 
 			if (length < 0)
+			{
+				Error() << "2";
 				return false;
+			}
 
 			packet.resize(length);
 
 			if (prev->read(packet.data(), length, 5, true) != length)
+			{
+				Error() << "3";
 				return false;
+			}
 
 			return true;
 		}
