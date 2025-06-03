@@ -401,6 +401,7 @@ namespace Protocol
 
 			tls_state = TLS_HANDSHAKING;
 			performHandshake();
+			ProtocolBase::onConnect();
 		}
 
 		void onDisconnect() override
